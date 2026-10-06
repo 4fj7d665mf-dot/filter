@@ -1,1 +1,61 @@
+name: Build VideoFilter
 
+'on':
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find and extract project ZIP
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ZIP="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'XelahotVideoFilter-*.zip' -print -quit)"
+          test -n "$ZIP"
+          rm -rf "$GITHUB_WORKSPACE/buildsrc"
+          mkdir -p "$GITHUB_WORKSPACE/buildsrc"
+          ditto -x -k "$ZIP" "$GITHUB_WORKSPACE/buildsrc"
+          test -f "$GITHUB_WORKSPACE/buildsrc/XelahotVideoFilter/Makefile"
+
+      - name: Install Theos
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --recursive --depth=1 https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          brew install ldid xz dpkg || true
+
+      - name: Build VideoFilter
+        shell: bash
+        working-directory: buildsrc/XelahotVideoFilter
+        run: |
+          set -euxo pipefail
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless ARCHS=arm64
+
+      - name: Collect output
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts
+          DYLIB="$(find buildsrc/XelahotVideoFilter/.theos -type f -name 'VideoFilter.dylib' -print -quit)"
+          test -n "$DYLIB"
+          cp "$DYLIB" artifacts/VideoFilter.dylib
+          find buildsrc/XelahotVideoFilter/packages -maxdepth 1 -type f -name '*.deb' -exec cp {} artifacts/ \; || true
+          file artifacts/VideoFilter.dylib
+          shasum -a 256 artifacts/VideoFilter.dylib > artifacts/VideoFilter.dylib.sha256
+
+      - name: Upload VideoFilter
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoFilter-build
+          path: artifacts/*
+          if-no-files-found: error
